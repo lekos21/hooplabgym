@@ -1,53 +1,20 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { ChevronLeft, ChevronRight, Users } from 'lucide-react'
-import { addDays, format, startOfWeek, endOfWeek, addWeeks } from 'date-fns'
+import { format, startOfWeek, endOfWeek, addWeeks } from 'date-fns'
 import { it } from 'date-fns/locale'
-import { getCorsi, getPrenotazioniByDate, getLezioneOverrides } from '../../lib/firestore'
-import { generateLessons, formatDate, getWeekDays } from '../../lib/calendar'
+import { useAppStore } from '../../stores/appStore'
+import { generateLessons, getWeekDays } from '../../lib/calendar'
 import Card from '../../components/ui/Card'
 import Badge from '../../components/ui/Badge'
 
 export default function AdminBookings() {
+  const { corsi, overrides, prenotazioni, loaded } = useAppStore()
   const [weekOffset, setWeekOffset] = useState(0)
-  const [corsi, setCorsi] = useState([])
-  const [overrides, setOverrides] = useState([])
-  const [prenotazioni, setPrenotazioni] = useState([])
-  const [loading, setLoading] = useState(true)
 
   const referenceDate = addWeeks(new Date(), weekOffset)
   const weekDays = getWeekDays(referenceDate)
   const weekStart = startOfWeek(referenceDate, { weekStartsOn: 1 })
   const weekEnd = endOfWeek(referenceDate, { weekStartsOn: 1 })
-
-  useEffect(() => {
-    loadData()
-  }, [weekOffset])
-
-  async function loadData() {
-    setLoading(true)
-    try {
-      const corsiData = await getCorsi()
-      setCorsi(corsiData)
-
-      const allOverrides = []
-      for (const corso of corsiData) {
-        const ov = await getLezioneOverrides(corso.id)
-        allOverrides.push(...ov)
-      }
-      setOverrides(allOverrides)
-
-      const allPrenotazioni = []
-      for (const day of weekDays) {
-        const pren = await getPrenotazioniByDate(formatDate(day))
-        allPrenotazioni.push(...pren)
-      }
-      setPrenotazioni(allPrenotazioni)
-    } catch (err) {
-      console.error('Error loading bookings data:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const lessons = useMemo(
     () => generateLessons(corsi, overrides, weekStart, weekEnd),
@@ -58,7 +25,7 @@ export default function AdminBookings() {
     return prenotazioni.filter((p) => p.corsoId === corsoId && p.date === date)
   }
 
-  if (loading) {
+  if (!loaded) {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="w-8 h-8 rounded-full border-2 border-brand-300 border-t-transparent animate-spin" />

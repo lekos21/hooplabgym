@@ -10,6 +10,7 @@ import {
 } from 'firebase/auth'
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { auth, db } from '../lib/firebase'
+import { useAppStore } from '../stores/appStore'
 
 const AuthContext = createContext()
 
@@ -31,11 +32,12 @@ export function AuthProvider({ children }) {
       await setDoc(userRef, {
         email: user.email,
         displayName: user.displayName || '',
+        role: 'user',
         paymentType: 'per-lesson',
         notes: '',
         createdAt: serverTimestamp(),
       })
-      return { email: user.email, displayName: user.displayName || '', paymentType: 'per-lesson', notes: '' }
+      return { email: user.email, displayName: user.displayName || '', role: 'user', paymentType: 'per-lesson', notes: '' }
     }
     return userSnap.data()
   }
@@ -61,19 +63,13 @@ export function AuthProvider({ children }) {
     return signOut(auth)
   }
 
-  async function checkAdmin(user) {
-    if (!user) return false
-    const tokenResult = await user.getIdTokenResult()
-    return !!tokenResult.claims.admin
-  }
-
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user)
       if (user) {
         const profile = await ensureUserDoc(user)
-        const isAdmin = await checkAdmin(user)
-        setUserProfile({ ...profile, isAdmin })
+        setUserProfile({ ...profile, isAdmin: profile.role === 'admin' })
+        useAppStore.getState().init(user.uid)
       } else {
         setUserProfile(null)
       }

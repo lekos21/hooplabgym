@@ -1,16 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Plus, Edit3, Trash2, Clock } from 'lucide-react'
-import { getCorsi, createCorso, updateCorso, deleteCorso } from '../../lib/firestore'
+import { useAppStore } from '../../stores/appStore'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
 import Modal from '../../components/ui/Modal'
 import Badge from '../../components/ui/Badge'
+import TimePicker from '../../components/ui/TimePicker'
 import { DAYS_IT } from '../../lib/calendar'
 
 const COURSE_COLORS = [
-  '#c4b5fd', '#f9a8d4', '#86efac', '#7dd3fc', '#fdba74',
-  '#fca5a5', '#a5b4fc', '#67e8f9', '#fcd34d', '#d8b4fe',
+  '#c4b5fd', '#f9a8d4', '#86efac', '#7dd3fc', '#fdba74', '#fca5a5',
 ]
 
 const EMPTY_FORM = {
@@ -22,28 +22,11 @@ const EMPTY_FORM = {
 }
 
 export default function AdminCorsi() {
-  const [corsi, setCorsi] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { corsi, loaded, addCorso, editCorso, removeCorso } = useAppStore()
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    loadCorsi()
-  }, [])
-
-  async function loadCorsi() {
-    setLoading(true)
-    try {
-      const data = await getCorsi()
-      setCorsi(data)
-    } catch (err) {
-      console.error('Error loading corsi:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
 
   function openCreate() {
     setForm(EMPTY_FORM)
@@ -68,11 +51,10 @@ export default function AdminCorsi() {
     setSaving(true)
     try {
       if (editingId) {
-        await updateCorso(editingId, form)
+        await editCorso(editingId, form)
       } else {
-        await createCorso(form)
+        await addCorso(form)
       }
-      await loadCorsi()
       setShowForm(false)
     } catch (err) {
       console.error('Save error:', err)
@@ -84,8 +66,7 @@ export default function AdminCorsi() {
   async function handleDelete(corsoId) {
     if (!confirm('Eliminare questo corso?')) return
     try {
-      await deleteCorso(corsoId)
-      await loadCorsi()
+      await removeCorso(corsoId)
     } catch (err) {
       console.error('Delete error:', err)
     }
@@ -114,7 +95,7 @@ export default function AdminCorsi() {
     }))
   }
 
-  if (loading) {
+  if (!loaded) {
     return (
       <div className="flex items-center justify-center py-12">
         <div className="w-8 h-8 rounded-full border-2 border-brand-300 border-t-transparent animate-spin" />
@@ -183,6 +164,11 @@ export default function AdminCorsi() {
         open={showForm}
         onClose={() => setShowForm(false)}
         title={editingId ? 'Modifica corso' : 'Nuovo corso'}
+        footer={
+          <Button className="w-full" onClick={handleSave} disabled={saving || !form.name.trim()}>
+            {saving ? '...' : editingId ? 'Salva modifiche' : 'Crea corso'}
+          </Button>
+        }
       >
         <div className="space-y-4">
           <Input
@@ -234,42 +220,41 @@ export default function AdminCorsi() {
               </button>
             </div>
             {form.schedule.map((slot, i) => (
-              <div key={i} className="flex items-center gap-2 bg-gray-50 rounded-xl p-2.5">
-                <select
-                  value={slot.dayOfWeek}
-                  onChange={(e) => updateScheduleSlot(i, 'dayOfWeek', e.target.value)}
-                  className="text-sm bg-white rounded-lg border border-gray-200 px-2 py-1.5 flex-1"
-                >
-                  {DAYS_IT.map((day, idx) => (
-                    <option key={idx} value={idx}>{day}</option>
-                  ))}
-                </select>
-                <input
-                  type="time"
-                  value={slot.startTime}
-                  onChange={(e) => updateScheduleSlot(i, 'startTime', e.target.value)}
-                  className="text-sm bg-white rounded-lg border border-gray-200 px-2 py-1.5 w-24"
-                />
-                <span className="text-gray-400 text-xs">–</span>
-                <input
-                  type="time"
-                  value={slot.endTime}
-                  onChange={(e) => updateScheduleSlot(i, 'endTime', e.target.value)}
-                  className="text-sm bg-white rounded-lg border border-gray-200 px-2 py-1.5 w-24"
-                />
-                <button
-                  onClick={() => removeScheduleSlot(i)}
-                  className="p-1 text-gray-400 hover:text-red-500"
-                >
-                  <Trash2 size={14} />
-                </button>
+              <div key={i} className="bg-gray-50 rounded-xl p-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <select
+                    value={slot.dayOfWeek}
+                    onChange={(e) => updateScheduleSlot(i, 'dayOfWeek', e.target.value)}
+                    className="text-sm bg-white rounded-lg border border-gray-200 px-3 py-2 font-medium"
+                  >
+                    {DAYS_IT.map((day, idx) => (
+                      <option key={idx} value={idx}>{day}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => removeScheduleSlot(i)}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+                <div className="flex items-center justify-center gap-4">
+                  <TimePicker
+                    label="Inizio"
+                    value={slot.startTime}
+                    onChange={(v) => updateScheduleSlot(i, 'startTime', v)}
+                  />
+                  <span className="text-gray-300 text-lg mt-4">→</span>
+                  <TimePicker
+                    label="Fine"
+                    value={slot.endTime}
+                    onChange={(v) => updateScheduleSlot(i, 'endTime', v)}
+                  />
+                </div>
               </div>
             ))}
           </div>
 
-          <Button className="w-full" onClick={handleSave} disabled={saving || !form.name.trim()}>
-            {saving ? '...' : editingId ? 'Salva modifiche' : 'Crea corso'}
-          </Button>
         </div>
       </Modal>
     </div>

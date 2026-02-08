@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react'
-import { Calendar, Clock, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+import { Calendar, Clock, X } from 'lucide-react'
 import { format, isAfter, parseISO } from 'date-fns'
 import { it } from 'date-fns/locale'
 import { useAuth } from '../contexts/AuthContext'
-import { getPrenotazioniByUser, getCorsi, deletePrenotazione } from '../lib/firestore'
+import { useAppStore } from '../stores/appStore'
 import { isBookable } from '../lib/calendar'
 import Card from '../components/ui/Card'
 import Button from '../components/ui/Button'
@@ -12,29 +12,10 @@ import { cn } from '../lib/utils'
 
 export default function BookingsPage() {
   const { currentUser } = useAuth()
-  const [bookings, setBookings] = useState([])
-  const [corsi, setCorsi] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { corsi, loaded, getMyBookings, cancelBooking } = useAppStore()
+  const [confirmId, setConfirmId] = useState(null)
 
-  useEffect(() => {
-    loadData()
-  }, [])
-
-  async function loadData() {
-    setLoading(true)
-    try {
-      const [bookingsData, corsiData] = await Promise.all([
-        getPrenotazioniByUser(currentUser.uid),
-        getCorsi(),
-      ])
-      setCorsi(corsiData)
-      setBookings(bookingsData)
-    } catch (err) {
-      console.error('Error loading bookings:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const bookings = getMyBookings(currentUser?.uid)
 
   function getCorso(corsoId) {
     return corsi.find((c) => c.id === corsoId)
@@ -48,16 +29,18 @@ export default function BookingsPage() {
     .filter((b) => !isAfter(parseISO(b.date), new Date()) && b.date !== format(new Date(), 'yyyy-MM-dd'))
     .sort((a, b) => b.date.localeCompare(a.date))
 
-  async function handleCancel(bookingId) {
+  async function handleCancel() {
+    if (!confirmId) return
     try {
-      await deletePrenotazione(bookingId)
-      setBookings((prev) => prev.filter((b) => b.id !== bookingId))
+      await cancelBooking(confirmId)
     } catch (err) {
       console.error('Cancel error:', err)
+    } finally {
+      setConfirmId(null)
     }
   }
 
-  if (loading) {
+  if (!loaded) {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="w-10 h-10 rounded-full border-2 border-brand-300 border-t-transparent animate-spin" />
@@ -111,10 +94,10 @@ export default function BookingsPage() {
                 </div>
                 {isBookable(booking.date) && (
                   <button
-                    onClick={() => handleCancel(booking.id)}
+                    onClick={() => setConfirmId(booking.id)}
                     className="p-2 rounded-xl text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
                   >
-                    <Trash2 size={16} />
+                    <X size={16} strokeWidth={2.5} />
                   </button>
                 )}
               </Card>
@@ -154,6 +137,24 @@ export default function BookingsPage() {
               </Card>
             )
           })}
+        </div>
+      )}
+      {/* Confirm cancel dialog */}
+      {confirmId && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setConfirmId(null)} />
+          <div className="relative z-10 w-full max-w-xs bg-white rounded-2xl shadow-xl p-6 text-center space-y-4">
+            <p className="text-sm font-semibold text-gray-800">Annullare la prenotazione?</p>
+            <p className="text-xs text-gray-500">Potrai prenotarti di nuovo se ci sono posti disponibili.</p>
+            <div className="flex gap-3">
+              <Button variant="secondary" className="flex-1" onClick={() => setConfirmId(null)}>
+                Indietro
+              </Button>
+              <Button variant="danger" className="flex-1" onClick={handleCancel}>
+                Conferma
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

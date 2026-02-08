@@ -37,7 +37,7 @@ App per un'insegnante di Hoop (cerchio, danza acrobatica).
 
 ## Auth
 Firebase Auth: login con Google + login con email/password.
-Ruolo admin gestito tramite custom claim Firebase.
+Ruolo admin gestito tramite campo `role` nel documento Firestore dell'utente (`role: 'admin'` o `role: 'user'`).
 
 ## Design
 - Mobile-first

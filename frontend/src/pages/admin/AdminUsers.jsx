@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
-import { Search, ChevronRight, StickyNote, Check, X, Minus, Plus } from 'lucide-react'
+import { Search, ChevronRight, ChevronDown, StickyNote, Check, X, Minus, Plus } from 'lucide-react'
+import { useAuth } from '../../contexts/AuthContext'
+import { useAppStore } from '../../stores/appStore'
 import { format, subMonths } from 'date-fns'
 import { it } from 'date-fns/locale'
 import {
-  getAllUsers,
   updateUserProfile,
   setMonthlyPaymentStatus,
   getMonthlyPayments,
-  updatePerLessonCounts,
 } from '../../lib/firestore'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
@@ -17,23 +17,45 @@ import Badge from '../../components/ui/Badge'
 import { cn } from '../../lib/utils'
 
 export default function AdminUsers() {
-  const [users, setUsers] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { currentUser } = useAuth()
+  const { users, usersLoaded, loadUsers, updateUserInStore, currentMonthPaidMap, setCurrentMonthPaid, setCurrentMonthPaidMap: setMonthPaidMap } = useAppStore()
+  const [loading, setLoading] = useState(!usersLoaded)
   const [search, setSearch] = useState('')
   const [selectedUser, setSelectedUser] = useState(null)
   const [monthlyPayments, setMonthlyPaymentsState] = useState([])
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+
+  const currentYearMonth = format(new Date(), 'yyyy-MM')
 
   useEffect(() => {
-    loadUsers()
+    initUsers()
   }, [])
 
-  async function loadUsers() {
+  async function initUsers() {
+    if (usersLoaded) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
-      const data = await getAllUsers()
-      setUsers(data)
+      const data = await loadUsers()
+      // Preload current month payment status for mensile users
+      const mensileUsers = data.filter((u) => u.paymentType === 'mensile')
+      const paidMap = {}
+      await Promise.all(
+        mensileUsers.map(async (u) => {
+          try {
+            const payments = await getMonthlyPayments(u.id)
+            const current = payments.find((p) => p.id === currentYearMonth)
+            paidMap[u.id] = current?.paid || false
+          } catch {
+            paidMap[u.id] = false
+          }
+        })
+      )
+      setMonthPaidMap(paidMap)
     } catch (err) {
       console.error('Error loading users:', err)
     } finally {
@@ -44,6 +66,7 @@ export default function AdminUsers() {
   async function openUserDetail(user) {
     setSelectedUser(user)
     setNotes(user.notes || '')
+    setShowHistory(false)
     if (user.paymentType === 'mensile') {
       try {
         const payments = await getMonthlyPayments(user.id)
@@ -58,9 +81,7 @@ export default function AdminUsers() {
     setSaving(true)
     try {
       await updateUserProfile(userId, { paymentType: type })
-      setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, paymentType: type } : u))
-      )
+      updateUserInStore(userId, { paymentType: type })
       if (selectedUser?.id === userId) {
         setSelectedUser((prev) => ({ ...prev, paymentType: type }))
       }
@@ -81,29 +102,43 @@ export default function AdminUsers() {
         }
         return [...prev, { id: yearMonth, paid: !currentPaid }]
       })
+      if (yearMonth === currentYearMonth) {
+        setCurrentMonthPaid(userId, !currentPaid)
+      }
     } catch (err) {
       console.error('Error toggling payment:', err)
     }
   }
 
-  async function handlePerLessonUpdate(userId, field, delta) {
+  function getUserBookingsCount(userId) {
+    return useAppStore.getState().prenotazioni.filter((p) => p.userId === userId).length
+  }
+
+  async function handleLessonsPaidUpdate(userId, delta) {
     const user = users.find((u) => u.id === userId)
-    const current = user?.[field] || 0
+    const current = user?.lessonsPaid || 0
     const newVal = Math.max(0, current + delta)
     try {
-      await updatePerLessonCounts(
-        userId,
-        field === 'lessonsAttended' ? newVal : user?.lessonsAttended || 0,
-        field === 'lessonsPaid' ? newVal : user?.lessonsPaid || 0
-      )
-      setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, [field]: newVal } : u))
-      )
+      await updateUserProfile(userId, { lessonsPaid: newVal })
+      updateUserInStore(userId, { lessonsPaid: newVal })
       if (selectedUser?.id === userId) {
-        setSelectedUser((prev) => ({ ...prev, [field]: newVal }))
+        setSelectedUser((prev) => ({ ...prev, lessonsPaid: newVal }))
       }
     } catch (err) {
-      console.error('Error updating per-lesson counts:', err)
+      console.error('Error updating lessons paid:', err)
+    }
+  }
+
+  async function handleSettle(userId) {
+    const booked = getUserBookingsCount(userId)
+    try {
+      await updateUserProfile(userId, { lessonsPaid: booked })
+      updateUserInStore(userId, { lessonsPaid: booked })
+      if (selectedUser?.id === userId) {
+        setSelectedUser((prev) => ({ ...prev, lessonsPaid: booked }))
+      }
+    } catch (err) {
+      console.error('Error settling:', err)
     }
   }
 
@@ -112,9 +147,7 @@ export default function AdminUsers() {
     setSaving(true)
     try {
       await updateUserProfile(selectedUser.id, { notes })
-      setUsers((prev) =>
-        prev.map((u) => (u.id === selectedUser.id ? { ...u, notes } : u))
-      )
+      updateUserInStore(selectedUser.id, { notes })
     } catch (err) {
       console.error('Error saving notes:', err)
     } finally {
@@ -122,11 +155,26 @@ export default function AdminUsers() {
     }
   }
 
-  const filteredUsers = users.filter(
-    (u) =>
-      (u.displayName || '').toLowerCase().includes(search.toLowerCase()) ||
-      (u.email || '').toLowerCase().includes(search.toLowerCase())
-  )
+  const filteredUsers = users
+    .filter((u) => u.id !== currentUser?.uid)
+    .filter(
+      (u) =>
+        (u.displayName || '').toLowerCase().includes(search.toLowerCase()) ||
+        (u.email || '').toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => {
+      const aOk = a.paymentType === 'per-lesson'
+        ? getUserBookingsCount(a.id) - (a.lessonsPaid || 0) <= 0
+        : a.paymentType === 'mensile'
+          ? (currentMonthPaidMap[a.id] || false)
+          : true
+      const bOk = b.paymentType === 'per-lesson'
+        ? getUserBookingsCount(b.id) - (b.lessonsPaid || 0) <= 0
+        : b.paymentType === 'mensile'
+          ? (currentMonthPaidMap[b.id] || false)
+          : true
+      return aOk === bOk ? 0 : aOk ? 1 : -1
+    })
 
   // Generate last 6 months for monthly payment view
   const recentMonths = Array.from({ length: 6 }, (_, i) => {
@@ -167,36 +215,37 @@ export default function AdminUsers() {
         </Card>
       ) : (
         filteredUsers.map((user) => {
-          const delta =
-            user.paymentType === 'per-lesson'
-              ? (user.lessonsAttended || 0) - (user.lessonsPaid || 0)
-              : 0
+          const isPerLesson = user.paymentType === 'per-lesson'
+          const delta = isPerLesson
+            ? getUserBookingsCount(user.id) - (user.lessonsPaid || 0)
+            : 0
+          const isMensile = user.paymentType === 'mensile'
+          const mensileOk = isMensile ? (currentMonthPaidMap[user.id] || false) : true
+          const isOk = isPerLesson ? delta <= 0 : mensileOk
 
           return (
             <Card
               key={user.id}
-              className="flex items-center gap-3 p-4 cursor-pointer hover:shadow-md transition-shadow active:scale-[0.99]"
+              className={cn(
+                'flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:shadow-md transition-shadow active:scale-[0.99] border-l-4',
+                isOk ? 'border-l-emerald-400' : 'border-l-amber-400'
+              )}
               onClick={() => openUserDetail(user)}
             >
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-brand-100 to-lavender-100 flex items-center justify-center flex-shrink-0">
-                <span className="text-sm font-semibold text-brand-600">
-                  {(user.displayName || user.email || '?')[0].toUpperCase()}
-                </span>
-              </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-800 truncate">
-                  {user.displayName || 'Senza nome'}
+                  {user.displayName || user.email || 'Senza nome'}
                 </p>
-                <p className="text-xs text-gray-500 truncate">{user.email}</p>
               </div>
-              <div className="flex items-center gap-2">
-                <Badge variant={user.paymentType === 'mensile' ? 'brand' : 'default'}>
-                  {user.paymentType === 'mensile' ? 'Mensile' : 'Per lezione'}
-                </Badge>
-                {user.paymentType === 'per-lesson' && delta > 0 && (
-                  <Badge variant="warning">-{delta}</Badge>
-                )}
-              </div>
+              <Badge variant={isMensile ? 'brand' : 'default'}>
+                {isMensile ? 'Mensile' : 'Per lezione'}
+              </Badge>
+              {isPerLesson && delta > 0 && (
+                <span className="text-xs font-bold text-amber-600">-{delta}</span>
+              )}
+              {isMensile && !mensileOk && (
+                <span className="text-xs font-bold text-amber-600">!</span>
+              )}
               <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
             </Card>
           )
@@ -243,81 +292,148 @@ export default function AdminUsers() {
             </div>
 
             {/* Monthly payment view */}
-            {selectedUser.paymentType === 'mensile' && (
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                  Pagamenti mensili
-                </label>
-                {recentMonths.map((ym) => {
-                  const paid = isMonthPaid(ym)
-                  const [year, month] = ym.split('-')
-                  const monthName = format(new Date(parseInt(year), parseInt(month) - 1), 'MMMM yyyy', { locale: it })
-                  return (
-                    <div
-                      key={ym}
-                      className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2.5"
+            {selectedUser.paymentType === 'mensile' && (() => {
+              const currentMonth = recentMonths[0]
+              const pastMonths = recentMonths.slice(1)
+              const currentPaid = isMonthPaid(currentMonth)
+              const [cy, cm] = currentMonth.split('-')
+              const currentMonthName = format(new Date(parseInt(cy), parseInt(cm) - 1), 'MMMM yyyy', { locale: it })
+
+              return (
+                <div className="space-y-3">
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                    Mese corrente
+                  </label>
+                  <div
+                    className={cn(
+                      'flex items-center justify-between rounded-xl px-4 py-3 border transition-all',
+                      currentPaid
+                        ? 'bg-emerald-50 border-emerald-200'
+                        : 'bg-red-50 border-red-200'
+                    )}
+                  >
+                    <div>
+                      <span className="text-sm font-semibold text-gray-800 capitalize">{currentMonthName}</span>
+                      <p className={cn('text-xs font-medium', currentPaid ? 'text-emerald-600' : 'text-red-500')}>
+                        {currentPaid ? 'Pagato' : 'Non pagato'}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleToggleMonthPaid(selectedUser.id, currentMonth, currentPaid)}
+                      className={cn(
+                        'w-10 h-10 rounded-full flex items-center justify-center transition-all',
+                        currentPaid
+                          ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200'
+                          : 'bg-red-100 text-red-500 hover:bg-red-200'
+                      )}
                     >
-                      <span className="text-sm text-gray-700 capitalize">{monthName}</span>
-                      <button
-                        onClick={() => handleToggleMonthPaid(selectedUser.id, ym, paid)}
-                        className={cn(
-                          'w-8 h-8 rounded-full flex items-center justify-center transition-all',
-                          paid
-                            ? 'bg-emerald-100 text-emerald-600'
-                            : 'bg-red-50 text-red-400 hover:bg-red-100'
-                        )}
-                      >
-                        {paid ? <Check size={16} /> : <X size={16} />}
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {/* Per-lesson payment view */}
-            {selectedUser.paymentType === 'per-lesson' && (
-              <div className="space-y-3">
-                <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                  Conteggio lezioni
-                </label>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-gray-50 rounded-xl p-3 text-center">
-                    <p className="text-xs text-gray-500 mb-1">Frequentate</p>
-                    <div className="flex items-center justify-center gap-2">
-                      <button
-                        onClick={() => handlePerLessonUpdate(selectedUser.id, 'lessonsAttended', -1)}
-                        className="w-7 h-7 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-100"
-                      >
-                        <Minus size={12} />
-                      </button>
-                      <span className="text-xl font-bold text-gray-800 w-8 text-center">
-                        {selectedUser.lessonsAttended || 0}
-                      </span>
-                      <button
-                        onClick={() => handlePerLessonUpdate(selectedUser.id, 'lessonsAttended', 1)}
-                        className="w-7 h-7 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-100"
-                      >
-                        <Plus size={12} />
-                      </button>
-                    </div>
+                      {currentPaid ? <Check size={18} /> : <X size={18} />}
+                    </button>
                   </div>
 
-                  <div className="bg-gray-50 rounded-xl p-3 text-center">
-                    <p className="text-xs text-gray-500 mb-1">Pagate</p>
-                    <div className="flex items-center justify-center gap-2">
+                  {/* Collapsible history */}
+                  <button
+                    onClick={() => setShowHistory((v) => !v)}
+                    className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    <ChevronDown size={14} className={cn('transition-transform', showHistory && 'rotate-180')} />
+                    Storico ({pastMonths.length} mesi)
+                  </button>
+
+                  {showHistory && (
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                      {pastMonths.map((ym) => {
+                        const paid = isMonthPaid(ym)
+                        const [year, month] = ym.split('-')
+                        const monthName = format(new Date(parseInt(year), parseInt(month) - 1), 'MMMM yyyy', { locale: it })
+                        return (
+                          <div
+                            key={ym}
+                            className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2"
+                          >
+                            <span className="text-xs text-gray-600 capitalize">{monthName}</span>
+                            <button
+                              onClick={() => handleToggleMonthPaid(selectedUser.id, ym, paid)}
+                              className={cn(
+                                'w-6 h-6 rounded-full flex items-center justify-center transition-all',
+                                paid
+                                  ? 'bg-emerald-100 text-emerald-600'
+                                  : 'bg-red-50 text-red-400 hover:bg-red-100'
+                              )}
+                            >
+                              {paid ? <Check size={12} /> : <X size={12} />}
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
+            {/* Per-lesson payment view */}
+            {selectedUser.paymentType === 'per-lesson' && (() => {
+              const booked = getUserBookingsCount(selectedUser.id)
+              const paid = selectedUser.lessonsPaid || 0
+              const delta = booked - paid
+
+              return (
+                <div className="space-y-3">
+                  {/* Delta card */}
+                  <div
+                    className={cn(
+                      'rounded-xl px-4 py-3 border text-center',
+                      delta > 0
+                        ? 'bg-amber-50 border-amber-200'
+                        : 'bg-emerald-50 border-emerald-200'
+                    )}
+                  >
+                    {delta > 0 ? (
+                      <>
+                        <p className="text-2xl font-bold text-amber-600">{delta}</p>
+                        <p className="text-xs font-medium text-amber-600">
+                          {delta === 1 ? 'lezione da saldare' : 'lezioni da saldare'}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-lg font-bold text-emerald-600">In pari</p>
+                        <p className="text-xs text-emerald-500">Nessun pagamento in sospeso</p>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Settle button */}
+                  {delta > 0 && (
+                    <Button
+                      className="w-full"
+                      onClick={() => handleSettle(selectedUser.id)}
+                    >
+                      <Check size={16} />
+                      Salda ({delta} {delta === 1 ? 'lezione' : 'lezioni'})
+                    </Button>
+                  )}
+
+                  {/* Info row */}
+                  <div className="flex items-center justify-between text-xs text-gray-500">
+                    <span>Prenotate: {booked}</span>
+                    <span>Pagate: {paid}</span>
+                  </div>
+
+                  {/* Manual adjust */}
+                  <div className="flex items-center justify-between bg-gray-50 rounded-xl px-3 py-2">
+                    <span className="text-xs text-gray-500">Correggi pagate</span>
+                    <div className="flex items-center gap-2">
                       <button
-                        onClick={() => handlePerLessonUpdate(selectedUser.id, 'lessonsPaid', -1)}
+                        onClick={() => handleLessonsPaidUpdate(selectedUser.id, -1)}
                         className="w-7 h-7 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-100"
                       >
                         <Minus size={12} />
                       </button>
-                      <span className="text-xl font-bold text-gray-800 w-8 text-center">
-                        {selectedUser.lessonsPaid || 0}
-                      </span>
+                      <span className="text-sm font-semibold text-gray-700 w-6 text-center">{paid}</span>
                       <button
-                        onClick={() => handlePerLessonUpdate(selectedUser.id, 'lessonsPaid', 1)}
+                        onClick={() => handleLessonsPaidUpdate(selectedUser.id, 1)}
                         className="w-7 h-7 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-500 hover:bg-gray-100"
                       >
                         <Plus size={12} />
@@ -325,27 +441,8 @@ export default function AdminUsers() {
                     </div>
                   </div>
                 </div>
-
-                {(() => {
-                  const delta = (selectedUser.lessonsAttended || 0) - (selectedUser.lessonsPaid || 0)
-                  if (delta === 0) return (
-                    <div className="text-center py-2">
-                      <Badge variant="success">In pari</Badge>
-                    </div>
-                  )
-                  if (delta > 0) return (
-                    <div className="text-center py-2">
-                      <Badge variant="warning">Da pagare: {delta} lezioni</Badge>
-                    </div>
-                  )
-                  return (
-                    <div className="text-center py-2">
-                      <Badge variant="brand">Credito: {Math.abs(delta)} lezioni</Badge>
-                    </div>
-                  )
-                })()}
-              </div>
-            )}
+              )
+            })()}
 
             {/* Notes */}
             <div className="space-y-1.5">

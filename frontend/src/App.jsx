@@ -10,6 +10,11 @@ import AdminCorsi from './pages/admin/AdminCorsi'
 import AdminUsers from './pages/admin/AdminUsers'
 import AdminBookings from './pages/admin/AdminBookings'
 
+function BookingsRouter() {
+  const { isAdmin } = useAuth()
+  return isAdmin ? <AdminBookings /> : <BookingsPage />
+}
+
 function PrivateRoute({ children }) {
   const { currentUser, loading } = useAuth()
   if (loading) {
@@ -68,7 +73,7 @@ function App() {
             element={
               <PrivateRoute>
                 <Layout>
-                  <BookingsPage />
+                  <BookingsRouter />
                 </Layout>
               </PrivateRoute>
             }
@@ -95,9 +100,8 @@ function App() {
               </PrivateRoute>
             }
           >
-            <Route index element={<AdminCorsi />} />
-            <Route path="users" element={<AdminUsers />} />
-            <Route path="bookings" element={<AdminBookings />} />
+            <Route index element={<AdminUsers />} />
+            <Route path="corsi" element={<AdminCorsi />} />
           </Route>
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

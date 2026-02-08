@@ -1,16 +1,9 @@
-import { useState, useEffect, useMemo } from 'react'
-import { ChevronLeft, ChevronRight, Users, Check, Clock } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { ChevronLeft, ChevronRight, UserRound, Check, Clock } from 'lucide-react'
 import { addWeeks, startOfWeek, endOfWeek, format, isToday, isBefore } from 'date-fns'
 import { it } from 'date-fns/locale'
 import { useAuth } from '../contexts/AuthContext'
-import {
-  getCorsi,
-  getPrenotazioniByDate,
-  getPrenotazioniByUser,
-  createPrenotazione,
-  deletePrenotazione,
-} from '../lib/firestore'
-import { getLezioneOverrides } from '../lib/firestore'
+import { useAppStore } from '../stores/appStore'
 import {
   generateLessons,
   formatDate,
@@ -27,14 +20,9 @@ import { cn } from '../lib/utils'
 
 export default function CalendarPage() {
   const { currentUser } = useAuth()
+  const { corsi, overrides, prenotazioni, loaded, book, cancelBooking, getMyBookings } = useAppStore()
   const [weekOffset, setWeekOffset] = useState(0)
-  const [corsi, setCorsi] = useState([])
-  const [overrides, setOverrides] = useState([])
-  const [prenotazioni, setPrenotazioni] = useState([])
-  const [myBookings, setMyBookings] = useState([])
   const [selectedLesson, setSelectedLesson] = useState(null)
-  const [lessonBookings, setLessonBookings] = useState([])
-  const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
 
   const referenceDate = addWeeks(new Date(), weekOffset)
@@ -42,40 +30,7 @@ export default function CalendarPage() {
   const weekStart = startOfWeek(referenceDate, { weekStartsOn: 1 })
   const weekEnd = endOfWeek(referenceDate, { weekStartsOn: 1 })
 
-  useEffect(() => {
-    loadData()
-  }, [weekOffset])
-
-  async function loadData() {
-    setLoading(true)
-    try {
-      const [corsiData, myBookingsData] = await Promise.all([
-        getCorsi(),
-        getPrenotazioniByUser(currentUser.uid),
-      ])
-      setCorsi(corsiData)
-      setMyBookings(myBookingsData)
-
-      const allOverrides = []
-      for (const corso of corsiData) {
-        const ov = await getLezioneOverrides(corso.id)
-        allOverrides.push(...ov)
-      }
-      setOverrides(allOverrides)
-
-      const allPrenotazioni = []
-      for (const day of weekDays) {
-        const dateStr = formatDate(day)
-        const pren = await getPrenotazioniByDate(dateStr)
-        allPrenotazioni.push(...pren)
-      }
-      setPrenotazioni(allPrenotazioni)
-    } catch (err) {
-      console.error('Error loading calendar data:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const myBookings = getMyBookings(currentUser?.uid)
 
   const lessons = useMemo(
     () => generateLessons(corsi, overrides, weekStart, weekEnd),
@@ -96,29 +51,24 @@ export default function CalendarPage() {
     return myBookings.find((b) => b.corsoId === corsoId && b.date === date)?.id
   }
 
-  async function handleLessonClick(lesson) {
+  function getLessonBookings(corsoId, date) {
+    return prenotazioni.filter((p) => p.corsoId === corsoId && p.date === date)
+  }
+
+  function handleLessonClick(lesson) {
     setSelectedLesson(lesson)
-    const bookings = prenotazioni.filter(
-      (p) => p.corsoId === lesson.corsoId && p.date === lesson.date
-    )
-    setLessonBookings(bookings)
   }
 
   async function handleBook() {
     if (!selectedLesson) return
     setActionLoading(true)
     try {
-      await createPrenotazione({
+      await book({
         corsoId: selectedLesson.corsoId,
         date: selectedLesson.date,
         userId: currentUser.uid,
         userName: currentUser.displayName || currentUser.email,
       })
-      await loadData()
-      const updatedBookings = prenotazioni.filter(
-        (p) => p.corsoId === selectedLesson.corsoId && p.date === selectedLesson.date
-      )
-      setLessonBookings(updatedBookings)
     } catch (err) {
       console.error('Booking error:', err)
     } finally {
@@ -132,15 +82,19 @@ export default function CalendarPage() {
     if (!bookingId) return
     setActionLoading(true)
     try {
-      await deletePrenotazione(bookingId)
-      await loadData()
-      setLessonBookings((prev) => prev.filter((b) => b.id !== bookingId))
+      await cancelBooking(bookingId)
     } catch (err) {
       console.error('Cancel error:', err)
     } finally {
       setActionLoading(false)
     }
   }
+
+  // Only show Sunday if there are lessons on Sunday this week
+  const sundayDateStr = formatDate(weekDays[6])
+  const hasSundayLessons = lessons.some((l) => l.date === sundayDateStr)
+  const visibleDays = hasSundayLessons ? weekDays : weekDays.slice(0, 6)
+  const colCount = visibleDays.length
 
   const totalHourHeight = 64 // px per hour
 
@@ -156,7 +110,7 @@ export default function CalendarPage() {
   const canGoBack = weekOffset > 0
   const canGoForward = weekOffset < 1
 
-  if (loading) {
+  if (!loaded) {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="w-10 h-10 rounded-full border-2 border-brand-300 border-t-transparent animate-spin" />
@@ -195,9 +149,9 @@ export default function CalendarPage() {
       {/* Calendar grid */}
       <Card className="p-0 overflow-hidden">
         {/* Day headers */}
-        <div className="grid grid-cols-[40px_repeat(7,1fr)] border-b border-gray-100">
+        <div className="border-b border-gray-100" style={{ display: 'grid', gridTemplateColumns: `40px repeat(${colCount}, 1fr)` }}>
           <div />
-          {weekDays.map((day) => (
+          {visibleDays.map((day) => (
             <div
               key={day.toISOString()}
               className={cn(
@@ -219,7 +173,7 @@ export default function CalendarPage() {
         </div>
 
         {/* Time grid */}
-        <div className="grid grid-cols-[40px_repeat(7,1fr)] relative">
+        <div className="relative" style={{ display: 'grid', gridTemplateColumns: `40px repeat(${colCount}, 1fr)` }}>
           {/* Hour labels */}
           <div className="relative">
             {Array.from({ length: hours.end - hours.start }, (_, i) => (
@@ -234,7 +188,7 @@ export default function CalendarPage() {
           </div>
 
           {/* Day columns */}
-          {weekDays.map((day) => {
+          {visibleDays.map((day) => {
             const dateStr = formatDate(day)
             const dayLessons = lessons.filter((l) => l.date === dateStr)
             const isPast = isBefore(day, new Date()) && !isToday(day)
@@ -269,26 +223,32 @@ export default function CalendarPage() {
                       key={`${lesson.corsoId}-${idx}`}
                       onClick={() => handleLessonClick(lesson)}
                       className={cn(
-                        'absolute inset-x-0.5 rounded-lg px-1 py-0.5 text-left transition-all overflow-hidden',
+                        'absolute inset-x-0.5 rounded-lg px-1.5 py-1 text-left transition-all overflow-hidden',
                         'hover:shadow-md hover:scale-[1.02] active:scale-[0.98]',
                         booked && 'ring-2 ring-offset-1'
                       )}
                       style={{
                         ...lessonStyle(lesson),
-                        backgroundColor: booked ? lesson.color : `${lesson.color}40`,
-                        color: booked ? '#fff' : lesson.color,
+                        backgroundColor: booked ? lesson.color : `${lesson.color}30`,
                         borderLeft: `3px solid ${lesson.color}`,
                         ringColor: lesson.color,
                       }}
                     >
-                      <div className="text-[10px] font-semibold leading-tight truncate">
+                      <div
+                        className="text-[11px] font-bold leading-tight truncate"
+                        style={{ color: booked ? '#fff' : '#374151' }}
+                      >
                         {lesson.corsoName}
                       </div>
-                      <div className="text-[9px] opacity-80 leading-tight">
-                        {lesson.startTime}
+                      <div
+                        className="text-[10px] font-medium leading-tight flex items-center gap-0.5 mt-0.5"
+                        style={{ color: booked ? 'rgba(255,255,255,0.85)' : '#6b7280' }}
+                      >
+                        <UserRound size={11} fill="currentColor" strokeWidth={0} />
+                        {count}/{lesson.capacity}
                       </div>
                       {booked && (
-                        <Check size={10} className="absolute top-0.5 right-0.5" />
+                        <Check size={11} className="absolute top-0.5 right-0.5 text-white" />
                       )}
                     </button>
                   )
@@ -324,7 +284,7 @@ export default function CalendarPage() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Users size={16} className="text-gray-400" />
+              <UserRound size={18} className="text-gray-400" fill="currentColor" strokeWidth={0} />
               <span className="text-sm text-gray-600">
                 {getLessonBookingCount(selectedLesson.corsoId, selectedLesson.date)} / {selectedLesson.capacity} posti
               </span>
@@ -334,11 +294,11 @@ export default function CalendarPage() {
             </div>
 
             {/* Booked people */}
-            {lessonBookings.length > 0 && (
+            {getLessonBookings(selectedLesson.corsoId, selectedLesson.date).length > 0 && (
               <div className="space-y-1.5">
                 <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Prenotati</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {lessonBookings.map((b) => (
+                  {getLessonBookings(selectedLesson.corsoId, selectedLesson.date).map((b) => (
                     <span
                       key={b.id}
                       className={cn(

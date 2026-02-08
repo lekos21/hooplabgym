@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { BookOpen, Users, Calendar } from 'lucide-react'
+import { Users, Calendar } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
 export default function AdminPage() {
@@ -20,16 +20,12 @@ export default function AdminPage() {
 
       <div className="flex gap-1 bg-gray-100/80 rounded-2xl p-1">
         <NavLink to="/admin" end className={tabClass}>
-          <Calendar size={16} />
-          Corsi
-        </NavLink>
-        <NavLink to="/admin/users" className={tabClass}>
           <Users size={16} />
           Utenti
         </NavLink>
-        <NavLink to="/admin/bookings" className={tabClass}>
-          <BookOpen size={16} />
-          Prenotazioni
+        <NavLink to="/admin/corsi" className={tabClass}>
+          <Calendar size={16} />
+          Corsi
         </NavLink>
       </div>
 
