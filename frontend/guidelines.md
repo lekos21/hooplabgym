@@ -1,19 +1,48 @@
-la mia webapp deve essere frontend only, mobile-first e connettersi a un db firestore. 
+# Hoop Lab Gym - Guidelines
 
-è un'app per un' insegnatnte di Hoop (cerchio, tipo danza acrobatica) e deve aiutare:
-1. gli utenti a prenotare le lezioni (ogni utente può prenotare la lazione che vuole ma max 7gg da ora, non tipo la lezione tra 2 settimane)
-2. l' insegnante a gestire principalmente 2 cose:
-   - vedere le prenotazioni
-   - vedere i pagamenti (NON ci serve integrazione effettiva, ci basta qualche campo a db per tracciare i pagamenti, poi vediamo come dopo)
+## Architettura
+Frontend-only (React + Vite + TailwindCSS + shadcn/ui) + Firebase (Auth + Firestore). No backend.
+Deploy: Vercel.
 
-Login/Auth:
-Gestita con firebase, per ora mettiamo login con google e login con mail semplice
+## Naming
+- **Corso**: ricorrenza di lezioni (es. "Hoop Base" ogni martedì 16-17 e giovedì 19-20)
+- **Lezione**: singola istanza/occorrenza di un corso
 
+## Funzionalità core
+App per un'insegnante di Hoop (cerchio, danza acrobatica).
 
-Funzionalità utente:
+### Utenti
+- Prenotano singole lezioni (max 7gg nel futuro da ora)
+- Vedono calendario settimanale stile Google Calendar con lezioni come blocchi colorati (colore diverso per corso)
+- Possono cliccare un blocco per prenotarsi o vedere se sono già prenotati
+- Vedono le altre persone prenotate (app a uso familiare, no problemi di privacy)
+- Hanno un riepilogo delle proprie lezioni prenotate future
+- Le lezioni a cui sono già prenotati devono essere distinguibili at-a-glance nel calendario
 
-L'utente principalmente deve vedere 2 cose: le sue lezioni prenotate e il calendario per prenotarne altre (di base calendario della settimana va bene, ma ovviamente se è venerdì devo poter agilmente prenotare per martedì prossimo) L' utente vede anche le altre persone prenotate per le varie lezioni, non ci sono gravi problemi di security su quello tranquillo (parliamo di un app a uso familaire)
+### Admin
+**Corsi:**
+- Crea/modifica corsi con: nome, descrizione, colore, ricorrenza (giorni + orari), capacità max (default 10)
+- Può spostare una singola lezione (override orario per una data specifica)
+- Può spostare l'intero corso (cambiare la ricorrenza stabilmente)
 
+**Prenotazioni:**
+- Vede tutte le prenotazioni per ogni lezione
 
-Funzionalità admin:
-L'admin deve poter creare 
+**Utenti:**
+- Lista di tutti gli utenti registrati
+- Due tipologie di pagamento (settabili solo dall'admin): **mensile** e **per-lesson**
+- Utente mensile: campo pagato/non pagato per mese, con storico mesi precedenti
+- Utente per-lesson: tracciamento delta tra lezioni frequentate e lezioni pagate (modo più semplice possibile, no tracking di quali lezioni specifiche)
+- Campo note libero per ogni utente
+
+## Auth
+Firebase Auth: login con Google + login con email/password.
+Ruolo admin gestito tramite custom claim Firebase.
+
+## Design
+- Mobile-first
+- Soft gradients, pastel colors, modern and clean
+- Cards moderne e curate
+- Calendario bello esteticamente, lezioni come blocchi colorati per corso
+- UI minimal e user-friendly
+- Elementi grafici che richiamano i cerchi/hoop (archi decorativi, anelli sottili, cerchi concentrici come sfondo, bordi circolari) — eleganti, mai pacchiani

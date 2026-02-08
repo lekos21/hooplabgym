@@ -1,72 +1,108 @@
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider, useAuth } from './contexts/AuthContext'
+import Layout from './components/Layout'
+import Login from './pages/Login'
+import CalendarPage from './pages/CalendarPage'
+import BookingsPage from './pages/BookingsPage'
+import ProfilePage from './pages/ProfilePage'
+import AdminPage from './pages/admin/AdminPage'
+import AdminCorsi from './pages/admin/AdminCorsi'
+import AdminUsers from './pages/admin/AdminUsers'
+import AdminBookings from './pages/admin/AdminBookings'
+
+function PrivateRoute({ children }) {
+  const { currentUser, loading } = useAuth()
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-brand-50 via-lavender-50 to-white flex items-center justify-center">
+        <div className="w-12 h-12 rounded-full border-[3px] border-brand-300 border-t-transparent animate-spin" />
+      </div>
+    )
+  }
+  return currentUser ? children : <Navigate to="/login" />
+}
+
+function AdminRoute({ children }) {
+  const { isAdmin, loading } = useAuth()
+  if (loading) return null
+  return isAdmin ? children : <Navigate to="/" />
+}
+
+function PublicRoute({ children }) {
+  const { currentUser, loading } = useAuth()
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-brand-50 via-lavender-50 to-white flex items-center justify-center">
+        <div className="w-12 h-12 rounded-full border-[3px] border-brand-300 border-t-transparent animate-spin" />
+      </div>
+    )
+  }
+  return currentUser ? <Navigate to="/" /> : children
+}
+
 function App() {
   return (
-    <div className="min-h-screen bg-gradient-to-b from-purple-900 via-purple-800 to-pink-700">
-      {/* Header */}
-      <header className="px-4 py-6">
-        <nav className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-white">Hoop Lab Gym</h1>
-          <button className="text-white p-2">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-        </nav>
-      </header>
-
-      {/* Hero Section */}
-      <main className="px-4 py-12">
-        <div className="text-center">
-          <div className="mb-8">
-            <div className="w-32 h-32 mx-auto rounded-full bg-white/20 flex items-center justify-center">
-              <span className="text-6xl">🔴</span>
-            </div>
-          </div>
-          
-          <h2 className="text-4xl font-bold text-white mb-4">
-            Danza Aerea con il Cerchio
-          </h2>
-          
-          <p className="text-lg text-purple-100 mb-8 max-w-md mx-auto">
-            Scopri la magia della danza acrobatica con il cerchio aereo. 
-            Lezioni per tutti i livelli.
-          </p>
-
-          <button className="bg-white text-purple-900 font-semibold px-8 py-4 rounded-full text-lg shadow-lg hover:bg-purple-100 transition-colors">
-            Prenota una Lezione
-          </button>
-        </div>
-      </main>
-
-      {/* Features */}
-      <section className="px-4 py-12">
-        <div className="grid gap-6">
-          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 text-center">
-            <span className="text-4xl mb-4 block">💪</span>
-            <h3 className="text-xl font-semibold text-white mb-2">Forza & Flessibilità</h3>
-            <p className="text-purple-200">Allena corpo e mente con movimenti eleganti</p>
-          </div>
-          
-          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 text-center">
-            <span className="text-4xl mb-4 block">🎭</span>
-            <h3 className="text-xl font-semibold text-white mb-2">Espressione Artistica</h3>
-            <p className="text-purple-200">Libera la tua creatività attraverso il movimento</p>
-          </div>
-          
-          <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 text-center">
-            <span className="text-4xl mb-4 block">👥</span>
-            <h3 className="text-xl font-semibold text-white mb-2">Community</h3>
-            <p className="text-purple-200">Entra a far parte della nostra famiglia</p>
-          </div>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="px-4 py-8 text-center">
-        <p className="text-purple-200 text-sm">
-          © 2026 Hoop Lab Gym. Tutti i diritti riservati.
-        </p>
-      </footer>
-    </div>
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route
+            path="/login"
+            element={
+              <PublicRoute>
+                <Login />
+              </PublicRoute>
+            }
+          />
+          <Route
+            path="/"
+            element={
+              <PrivateRoute>
+                <Layout>
+                  <CalendarPage />
+                </Layout>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/bookings"
+            element={
+              <PrivateRoute>
+                <Layout>
+                  <BookingsPage />
+                </Layout>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/profile"
+            element={
+              <PrivateRoute>
+                <Layout>
+                  <ProfilePage />
+                </Layout>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <PrivateRoute>
+                <AdminRoute>
+                  <Layout>
+                    <AdminPage />
+                  </Layout>
+                </AdminRoute>
+              </PrivateRoute>
+            }
+          >
+            <Route index element={<AdminCorsi />} />
+            <Route path="users" element={<AdminUsers />} />
+            <Route path="bookings" element={<AdminBookings />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/" />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   )
 }
 
